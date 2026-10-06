@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+.git
+Frontend
+tests
+docs
+**/*.log
+**/.vercel
+**/.output
+.tmp

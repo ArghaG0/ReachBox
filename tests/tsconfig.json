@@ -1,0 +1,5 @@
+{
+  "extends": "../backend/tsconfig.json",
+  "compilerOptions": { "rootDir": "..", "noEmit": true },
+  "include": ["unit/**/*.ts", "contract/**/*.ts", "integration/**/*.ts", "recovery/**/*.ts", "helpers/**/*.ts", "ethereal/**/*.ts", "vitest*.ts"]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "reachbox",
+  "private": true,
+  "workspaces": ["backend"],
+  "scripts": {
+    "dev:api": "npm run dev:api --workspace backend",
+    "dev:worker": "npm run dev:worker --workspace backend",
+    "build": "npm run build --workspace backend",
+    "typecheck": "npm run typecheck --workspace backend && tsc -p tests/tsconfig.json",
+    "test": "vitest run --config tests/vitest.backend.config.ts",
+    "test:integration": "npm run build && vitest run --config tests/vitest.integration.config.ts",
+    "test:recovery": "npm run build && vitest run --config tests/vitest.recovery.config.ts",
+    "test:ethereal": "vitest run --config tests/vitest.ethereal.config.ts",
+    "db:generate": "npm run db:generate --workspace backend",
+    "db:migrate": "npm run db:migrate --workspace backend",
+    "db:seed": "npm run db:seed --workspace backend"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/smtp-server": "^3.5.0",
+    "@types/supertest": "^6.0.0",
+    "smtp-server": "^3.16.1",
+    "supertest": "^7.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.8.3",
+    "vitest": "4.1.11",
+    "vite": "^7.3.0"
+  },
+  "overrides": {
+    "@prisma/config": { "deepmerge-ts": "^8.0.0" }
+  }
+}
