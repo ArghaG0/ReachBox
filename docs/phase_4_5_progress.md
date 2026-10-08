@@ -13,3 +13,9 @@ Implemented Redis TIME windows, test-only clock overrides, isolated prefixes, fi
 ## Step 2: worker integration
 
 Integrated claim-first processing, persisted schedule checks, hourly deferrals, restored claim attempts, queue-wide pacing, and isolated optional hooks. Added monotonic `claimVersion` fencing because restored attempt counters can be reused. Apply the new migration before restarting workers. Added real-service tests for one/two workers, later-window draining, pacing, hook failures, interrupted rescheduling, and stale claim fencing. Typecheck and 18 unit/contract tests passed; real-service verification remains pending Docker availability.
+
+## Step 3: authenticated Bull Board
+
+Mounted Bull Board using the API's existing producer queue, ahead of CORS/session middleware. UI, assets, and API routes require Basic auth; missing configuration fails closed. Credential comparisons use equal-length SHA-256 hashes and timing-safe comparison. Authorization headers are not logged. Added Supertest coverage against the actual app.
+
+Docker Desktop and PostgreSQL/Redis were started successfully. The real integration suite passed all 22 tests, including Step 1/2 coverage. Initial test fixture issues were corrected: wait for Redis readiness, avoid exhausting transaction admission during fixture creation, and assert the actual BullMQ delayed-set timestamp rather than adding delay to the original creation timestamp. Backend typecheck/build also passed. Final full regression checks follow in Step 4.

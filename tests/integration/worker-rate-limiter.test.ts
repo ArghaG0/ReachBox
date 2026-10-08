@@ -11,7 +11,8 @@ import { queueFixture } from "../helpers/queueFixture.js";
 it.each([1, 2])("sends three and defers seven with exact offsets and intact budgets using %i workers", async (workers) => {
   const f = await queueFixture();
   try {
-    const rows = await Promise.all(Array.from({ length: 10 }, () => f.schedule(false)));
+    const rows = [];
+    for (let i = 0; i < 10; i++) rows.push(await f.schedule(false));
     const send = vi.fn().mockResolvedValue({ messageId: "sent", previewUrl: null });
     const check = createRateLimiter(f.workerRedis, f.env);
     const windowMs = f.env.RATE_WINDOW_MS;
@@ -35,7 +36,8 @@ it.each([1, 2])("sends three and defers seven with exact offsets and intact budg
       const job = (await f.queue.getJob(transportJobId(row.id)))!;
       expect(await job.getState()).toBe("delayed");
       expect(job.attemptsMade).toBe(0);
-      expect(job.timestamp + job.delay).toBe(row.scheduledAt.getTime());
+      const score = await f.producerRedis.zscore(f.queue.toKey("delayed"), job.id!);
+      expect(Math.floor(Number(score) / 4096)).toBe(row.scheduledAt.getTime());
     }
     expect(onRateLimited).toHaveBeenCalledTimes(7);
     expect(onEmailChanged).toHaveBeenCalled();
@@ -56,7 +58,8 @@ it.each([1, 2])("sends three and defers seven with exact offsets and intact budg
 it("paces six job starts across two workers at approximately 500ms or more", async () => {
   const f = await queueFixture({ MIN_SEND_DELAY_MS: 500 });
   try {
-    const rows = await Promise.all(Array.from({ length: 6 }, () => f.schedule(false, null, 100)));
+    const rows = [];
+    for (let i = 0; i < 6; i++) rows.push(await f.schedule(false, null, 100));
     const starts: number[] = [];
     const send = vi.fn().mockResolvedValue({ messageId: "paced", previewUrl: null });
     for (let i = 0; i < 2; i++) f.start(send).on("active", () => starts.push(performance.now()));
@@ -93,7 +96,8 @@ it("repairs a DB deferral committed before moveToDelayed fails", async () => {
     await vi.waitFor(async () => {
       const restored = (await f.queue.getJob(job.id!))!;
       expect(await restored.getState()).toBe("delayed");
-      expect(restored.timestamp + restored.delay).toBe(persisted.scheduledAt.getTime());
+      const score = await f.producerRedis.zscore(f.queue.toKey("delayed"), restored.id!);
+      expect(Math.floor(Number(score) / 4096)).toBe(persisted.scheduledAt.getTime());
     }, { timeout: 10000 });
     expect(send).not.toHaveBeenCalled();
     expect(await f.db.prisma.email.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ attempts: 0, failedAttempts: 0 });

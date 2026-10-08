@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { expect, it } from "vitest";
 import { createRedis } from "../../backend/src/redis/connection.js";
 import { createRateLimiter } from "../../backend/src/queue/rateLimiter.js";
@@ -7,6 +8,7 @@ import { testEnv } from "../helpers/env.js";
 it("atomically counts concurrent calls, isolates senders, expires keys, and resets at boundaries", async () => {
   const env = testEnv({ REDIS_URL: process.env.TEST_REDIS_URL ?? "redis://localhost:6379", RATE_KEY_PREFIX: "test-rate-" + randomUUID() });
   const redis = createRedis(env, "producer");
+  await once(redis, "ready");
   const checkHourlyLimit = createRateLimiter(redis, env);
   const keys = ["a:3600000", "b:3600000", "a:7200000"].map((suffix) => env.RATE_KEY_PREFIX + ":" + suffix);
   try {
@@ -31,6 +33,7 @@ it("atomically counts concurrent calls, isolates senders, expires keys, and rese
 it("uses Redis TIME when no override is supplied", async () => {
   const env = testEnv({ REDIS_URL: process.env.TEST_REDIS_URL ?? "redis://localhost:6379", RATE_KEY_PREFIX: "test-time-" + randomUUID() });
   const redis = createRedis(env, "producer");
+  await once(redis, "ready");
   let key: string | undefined;
   try {
     const before = await redis.time();

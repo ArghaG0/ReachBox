@@ -12,7 +12,7 @@ const redis = createRedis(env, "producer");
 const queue = createEmailQueue(env, redis);
 queue.on("error", () => console.error(JSON.stringify({ event: "queue_error" })));
 const schedule = createScheduler({ prisma, env, enqueue: createEmailProducer(queue, env) });
-const server = createApp({ env, schedule }).listen(env.PORT, () => {
+const server = createApp({ env, schedule, queue }).listen(env.PORT, () => {
   console.log(JSON.stringify({ event: "api_ready", port: env.PORT, auth: "closed_until_phase_8" }));
 });
 
