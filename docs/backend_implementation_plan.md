@@ -1,6 +1,6 @@
 # Backend implementation plan
 
-Status: **Approved. Section 2 proposals accepted; Phases 1-3 and split deployment preparation authorized.**
+Status: **Approved. Section 2 proposals accepted; Phases 1-5 and split deployment preparation authorized and implemented.**
 
 ## 1. Scope and reviewed context
 
@@ -8,7 +8,7 @@ Read all of `SPEC.md`, including Sections 0–11. Reviewed `Frontend/AGENTS.md`,
 
 The existing directory is **`Frontend/`**, with a capital F. Preserve that spelling for Linux compatibility; create only the new backend at `backend/`. The frontend uses TanStack Start/Router rather than the spec's React Router, but its HTTP contract is compatible and requires no router replacement. Respect the existing Lovable instruction against rewriting published Git history.
 
-This document records the approved full implementation plan. The current implementation delivers Phases 1-3; Phases 4-10 remain pending. Verification and baseline limitations are recorded in the root README.
+This document records the approved full implementation plan. The current implementation delivers Phases 1-5; Phases 6-10 remain pending. Verification and baseline limitations are recorded in the root README and `docs/phase_4_5_progress.md`. The remaining priority order is Phases 7/8, then Phases 9/6; those implementations have not begun.
 
 ## 2. Decisions requiring attention during plan review
 
@@ -157,7 +157,7 @@ Acceptance: an owned sender and normalized recipients produce the exact frontend
 ### Phase 3 — Atomic claims, retries, status, reconciliation
 
 1. Atomically update only eligible `scheduled` rows to `sending`, incrementing attempts. Enforce persisted `scheduledAt` before sending so a stale queue delay cannot cause an early send. A `sent` or terminal `failed` row is a no-op.
-2. Use conditional transitions tied to the claim version (the returned attempts value can serve as a fencing version). A worker that lost ownership must not overwrite a newer claim. Bound SMTP execution below the stale threshold and check queue lock ownership when reclaiming stale work; document that this still does not close the SMTP acceptance/commit window.
+2. Use conditional transitions tied to a monotonic `claimVersion`. Phase 4 separates this from `attempts`, because deferrals restore the attempt counter and would otherwise reuse a fencing value. A worker that lost ownership must not overwrite a newer claim. Bound SMTP execution below the stale threshold and check queue lock ownership when reclaiming stale work; document that this still does not close the SMTP acceptance/commit window.
 3. On retryable SMTP failure, restore `scheduled` and store the error before throwing for BullMQ backoff; otherwise the next attempt would skip a `sending` row. Set terminal `failed` only after the configured failure budget is exhausted. Rate-limit deferrals must not be interpreted as SMTP failures; database claim attempts and BullMQ failed attempts are distinct counts.
 4. Commit `sent`, `sentAt`, `messageId`, and `previewUrl` before optional side effects. Elasticsearch/Slack failures never turn an accepted send into a retry.
 5. Before starting consumption, scan scheduled records in bounded batches and restore missing jobs with their deterministic IDs. Reset genuinely stale `sending` rows with conditional writes. Inspect existing queue states as well as existence: reconcile scheduled DB records behind retained completed/failed jobs through safe state-specific retry/recreation, without removing active work or re-enqueueing sent records.
@@ -239,4 +239,4 @@ Use dedicated test data stores or isolated namespaces and explicit cleanup limit
 
 ## 7. Approval gate
 
-The user approved the plan, the canonical-versus-BullMQ job-ID mapping, the residual SMTP crash window, and root-level test relocation. Phases 1-3 and deployment preparation are authorized; Phase 4 is outside the current scope.
+The user approved the plan, the canonical-versus-BullMQ job-ID mapping, the residual SMTP crash window, and root-level test relocation. Phases 1-5 and deployment preparation are authorized. The current resumed task implements and verifies only Phases 4/5; Phases 6-9 are not part of this implementation turn.

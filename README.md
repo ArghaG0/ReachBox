@@ -1,8 +1,8 @@
 # ReachBox email scheduler
 
-Phases 1-3 are implemented: PostgreSQL/Prisma, Redis/BullMQ, Ethereal provisioning, scheduling, atomic claims, SMTP retries, and restart reconciliation. The frontend remains in `Frontend/`. See [the implementation plan](docs/backend_implementation_plan.md).
+Phases 1-5 are implemented: PostgreSQL/Prisma, Redis/BullMQ, Ethereal provisioning, scheduling, atomic claims, SMTP retries, restart reconciliation, hourly limiting, queue pacing, and Bull Board. The frontend remains in `Frontend/`. See [the implementation plan](docs/backend_implementation_plan.md) and [verification progress](docs/phase_4_5_progress.md).
 
-This is still an intermediate service. Hourly limiting/pacing, Bull Board, Elasticsearch indexing/search, read APIs, Google OAuth, and Slack remain pending. The live scheduling API deliberately returns 401 until authentication is implemented. Tests inject an owner without introducing a public bypass.
+This is still an intermediate service. Elasticsearch indexing/search, read APIs, Google OAuth, and Slack remain pending. The live scheduling API deliberately returns 401 until authentication is implemented. Tests inject an owner without introducing a public bypass.
 
 ## Local setup
 
@@ -60,7 +60,7 @@ A 201 means durable database acceptance. Dispatch failures log `campaign_dispatc
 
 ## Phase 3 claims, retries, and recovery
 
-- An atomic PostgreSQL update claims a due `scheduled` row as `sending` and increments `attempts`. Later writes require that claim version and state, preventing older claims from overwriting newer work.
+- An atomic PostgreSQL update claims a `scheduled` row as `sending` and increments `attempts` and monotonic `claimVersion`. The worker checks the persisted due time before rate admission or SMTP. Later writes require the claim version and state, preventing older claims from overwriting newer work even when deferral restores the attempt count.
 - The new migration adds `failedAttempts`, a durable SMTP failure count. Transient failures restore `scheduled` with exponential backoff; exhaustion marks `failed`. Recreating a missing Redis job cannot reset this budget.
 - Success saves `sentAt`, `messageId`, and `previewUrl` and clears the error. Sent/failed records are skipped on replay, including after completed queue entries are removed.
 - Reconciliation runs before consumption, on worker Redis reconnect, and following worker failures. Scans use bounded UUID pagination and serialized execution per process. Independent workers can safely repeat the scan.
@@ -80,11 +80,38 @@ New environment settings have backward-compatible defaults:
 | `RECONCILIATION_BATCH_SIZE` | 200 |
 | `SHUTDOWN_TIMEOUT_MS` | 90000 |
 
-Existing `STALE_CLAIM_MS` is 120000 and `JOB_ATTEMPTS` is 3. Existing environment files continue working; apply the new database migration before updated workers start. `attempts` counts claims, including crash recovery; `failedAttempts` counts SMTP failures.
+Existing `STALE_CLAIM_MS` is 120000 and `JOB_ATTEMPTS` is 3. Existing environment files continue working; apply database migrations before updated workers start. `attempts` counts claims, including crash recovery, with scheduling/rate deferrals restored; `failedAttempts` counts SMTP failures. Phase 4 adds a separate `claimVersion` column. Stop old workers, migrate, then start the updated workers so all processes use the same fencing and pacing policy.
 
 SMTP acceptance and the success commit cannot be atomic. A crash after acceptance but before the database commit can still cause a duplicate during recovery. A deterministic Message-ID supports tracing, not recipient deduplication. The duration of this residual window is not guaranteed to be microseconds.
 
-Scheduling uses BullMQ delayed jobs only. No cron, repeatable scheduler, or in-memory rate counter is used. BullMQ's unused repeat APIs bring a transitive cron-parser dependency. `MIN_SEND_DELAY_MS=2000` and hourly limits are configured/stored but are **not enforced until Phase 4**.
+Scheduling uses BullMQ delayed jobs only. No cron, repeatable scheduler, or in-memory rate counter is used. BullMQ's unused repeat APIs bring a transitive cron-parser dependency.
+
+## Hourly limits and queue pacing
+
+Workers use `WORKER_CONCURRENCY=5` and BullMQ's queue-wide limiter `{ max: 1, duration: MIN_SEND_DELAY_MS }`, with a default of **2,000 ms**. All workers sharing a queue must use the same configuration. This spaces job starts across workers, not SMTP completion times. Under load, delayed jobs remain in Redis and overflow processing itself also observes this pacing. See [BullMQ rate limiting](https://docs.bullmq.io/guide/rate-limiting).
+
+One atomic Lua script uses Redis `TIME` to derive UTC fixed windows (`RATE_WINDOW_MS=3600000`). It increments `rate:<senderId>:<windowStartEpochMs>` and applies `RATE_KEY_TTL_SECONDS=7200` on first creation. `RATE_KEY_PREFIX=rate` must be shared across workers; tests use isolated prefixes and clean their keys. Dynamic script keys require single-instance Redis, not Redis Cluster. Clock overrides are accepted only in test mode.
+
+The campaign's `hourlyLimit` is the threshold, falling back to `MAX_EMAILS_PER_HOUR_PER_SENDER=200`. All campaigns using one sender share the same counter, even if they supply different thresholds. Both admitted and denied checks increment the counter; SMTP retries also recheck and count. Fixed windows can allow bursts across a boundary and are not sliding-window quotas.
+
+On denial, `overflowIndex = count - limit - 1` and `retryAt = nextWindowStart + overflowIndex * MIN_SEND_DELAY_MS`. A fenced database update restores `scheduled`, persists the new time, and restores the claim attempt counter. The worker calls `moveToDelayed(retryAt, token)` then throws `DelayedError`, preserving BullMQ's failed-attempt budget. This follows [BullMQ's delayed processing pattern](https://docs.bullmq.io/patterns/process-step-jobs). Admission is checked again in each later window, so repeated overflow moves forward without being dropped. Offsets provide best-effort ordering; concurrent execution and retries do not guarantee original recipient order.
+
+If the DB reschedule commits before the Redis transition fails, reconciliation and the persisted-time guard repair the queue without sending early. Optional `onRateLimited` and `onEmailChanged` hooks are currently no-ops; hook errors are isolated. Elasticsearch and Slack integrations remain pending.
+
+## Bull Board
+
+Set nonempty `BULL_BOARD_USER` and `BULL_BOARD_PASS` in `backend/.env`, restart the API, then open `http://localhost:4000/admin/queues/`. The dashboard uses the API's existing producer queue; it never starts a worker. Basic authentication covers the UI, assets, and API routes. Missing credentials return 503; incorrect/missing request credentials return 401 with a Basic challenge. No request headers or Authorization values are logged. Use HTTPS for deployed access.
+
+To test the new mechanics without OAuth or external SMTP credentials:
+
+```powershell
+npm.cmd run db:generate
+npm.cmd run db:migrate
+npm.cmd run test:integration -- tests/integration/hourly-limiter.test.ts tests/integration/worker-rate-limiter.test.ts tests/integration/bull-board.test.ts
+npm.cmd run test:recovery
+```
+
+The limiter tests use real Redis, isolated PostgreSQL schemas, and stub SMTP. They cover 50 concurrent admissions, exact hour offsets/TTL, one and two workers sending three of ten and deferring seven, unchanged retry budgets, subsequent-window draining, 500 ms queue pacing, failed hooks, and a DB commit followed by a failed Redis reschedule. Window advancement is controlled in tests; no hour-long sleeps are needed. Dashboard tests exercise Basic auth through the real Express application.
 
 ## Tests and recovery demonstration
 
@@ -169,6 +196,4 @@ Set `VITE_API_URL` to the backend origin without `/api`. Keep `VITE_USE_MOCKS=tr
 
 ## Remaining integrations
 
-Google OAuth (Phase 8) requires client credentials and the exact registered callback URL. Slack (Phase 9) requires client credentials, `incoming-webhook`, and an HTTPS callback such as ngrok for local development. Elasticsearch is healthy locally but its indexing/search implementation is Phase 6. Bull Board is Phase 5. Attachments, email/password login, and star/archive/delete backend actions remain out of scope.
-
-Phase 4 hourly limiting remains outside the current implementation.
+The remaining sequence is Phase 7 read APIs plus Phase 8 Google OAuth, followed by Phase 9 Slack and Phase 6 Elasticsearch. Google requires client credentials and the exact registered callback URL. Slack requires client credentials, `incoming-webhook`, and an HTTPS callback such as ngrok for local development. Elasticsearch indexing/search remains pending. Attachments, email/password login, and star/archive/delete backend actions remain out of scope.

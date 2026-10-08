@@ -31,7 +31,7 @@ redis.on("ready", requestReconciliation);
 try {
   await reconcile();
   void worker.run().catch(() => { void stop(1).catch(() => process.exit(1)); });
-  console.log(JSON.stringify({ event: "worker_ready", phase: 3, concurrency: env.WORKER_CONCURRENCY }));
+  console.log(JSON.stringify({ event: "worker_ready", phase: 4, concurrency: env.WORKER_CONCURRENCY, minSendDelayMs: env.MIN_SEND_DELAY_MS }));
 } catch {
   await stop(1);
 }
