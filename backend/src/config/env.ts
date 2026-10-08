@@ -51,10 +51,15 @@ export const envSchema = z.object({
   RECONCILIATION_BATCH_SIZE: positiveInt.max(1000).default(200),
   SHUTDOWN_TIMEOUT_MS: positiveInt.default(90000),
   RATE_KEY_TTL_SECONDS: positiveInt,
+  RATE_WINDOW_MS: positiveInt.default(3600000),
+  RATE_KEY_PREFIX: z.string().regex(/^[\w-]+$/).default("rate"),
   SLACK_DEBOUNCE_SECONDS: positiveInt,
   SEED_SENDER_COUNT: positiveInt.min(2),
   SEED_USER_ID: z.preprocess((value) => value === "" ? undefined : value, z.string().uuid().optional()),
 }).superRefine((env, ctx) => {
+  if (env.RATE_KEY_TTL_SECONDS * 1000 < env.RATE_WINDOW_MS) {
+    ctx.addIssue({ code: "custom", path: ["RATE_KEY_TTL_SECONDS"], message: "Must cover at least one rate window" });
+  }
   if (env.NODE_ENV === "production" && !env.COOKIE_SECURE) {
     ctx.addIssue({ code: "custom", path: ["COOKIE_SECURE"], message: "Production requires secure cookies" });
   }

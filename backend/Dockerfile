@@ -9,6 +9,7 @@ COPY backend/prisma ./backend/prisma
 RUN npm ci
 COPY backend/tsconfig.json ./backend/tsconfig.json
 COPY backend/src ./backend/src
+COPY backend/scripts ./backend/scripts
 RUN npm run db:generate && npm run build
 
 FROM build AS dependencies
