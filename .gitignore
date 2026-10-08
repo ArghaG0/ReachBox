@@ -7,4 +7,6 @@ coverage/
 !.env.example
 *.log
 .tmp/
+/tests/
+/docs/
 
