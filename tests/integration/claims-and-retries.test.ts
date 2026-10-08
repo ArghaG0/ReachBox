@@ -11,11 +11,12 @@ it("allows one of 30 concurrent database claims and fences an older claim", asyn
     const claims = await Promise.all(Array.from({ length: 30 }, () => claimEmail(f.db.prisma, row.id, new Date())));
     expect(claims.filter(Boolean)).toHaveLength(1);
     const first = claims.find(Boolean)!;
-    await f.db.prisma.email.update({ where: { id: row.id }, data: { status: "scheduled" } });
+    await f.db.prisma.email.update({ where: { id: row.id }, data: { status: "scheduled", attempts: { decrement: 1 } } });
     const second = await claimEmail(f.db.prisma, row.id, new Date());
-    const stale = await f.db.prisma.email.updateMany({ where: claimFilter(row.id, first.attempts), data: { status: "sent" } });
+    const stale = await f.db.prisma.email.updateMany({ where: claimFilter(row.id, first.claimVersion), data: { status: "sent" } });
     expect(stale.count).toBe(0);
-    expect(second!.attempts).toBe(first.attempts + 1);
+    expect(second!.attempts).toBe(first.attempts);
+    expect(second!.claimVersion).toBe(first.claimVersion + 1);
   } finally { await f.close(); }
 });
 

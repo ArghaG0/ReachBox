@@ -24,7 +24,7 @@ export async function reconcileEmails(prisma: PrismaClient, queue: EmailQueue, e
       if (state === "active" && await redis.get(queue.toKey(jobId + ":lock"))) continue;
       if (state === "failed" && job?.failedReason.includes("stalled more than allowable limit")) {
         const changed = await prisma.email.updateMany({
-          where: { id: row.id, status: row.status, attempts: row.attempts, updatedAt: row.updatedAt },
+          where: { id: row.id, status: row.status, claimVersion: row.claimVersion, updatedAt: row.updatedAt },
           data: { status: "failed", error: job.failedReason },
         });
         result.failed += changed.count;
@@ -43,7 +43,7 @@ export async function reconcileEmails(prisma: PrismaClient, queue: EmailQueue, e
       }
       if (row.failedAttempts >= env.JOB_ATTEMPTS) {
         const changed = await prisma.email.updateMany({
-          where: { id: row.id, status: row.status, attempts: row.attempts, updatedAt: row.updatedAt },
+          where: { id: row.id, status: row.status, claimVersion: row.claimVersion, updatedAt: row.updatedAt },
           data: { status: "failed", error: row.error ?? job?.failedReason ?? "SMTP retry budget exhausted" },
         });
         result.failed += changed.count;
@@ -51,7 +51,7 @@ export async function reconcileEmails(prisma: PrismaClient, queue: EmailQueue, e
       }
       if (row.status === "sending") {
         const changed = await prisma.email.updateMany({
-          where: { ...claimFilter(row.id, row.attempts), updatedAt: row.updatedAt },
+          where: { ...claimFilter(row.id, row.claimVersion), updatedAt: row.updatedAt },
           data: { status: "scheduled" },
         });
         if (!changed.count) continue;

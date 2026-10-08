@@ -77,6 +77,7 @@ model Email {
   status      EmailStatus @default(scheduled)
   sentAt      DateTime?   @db.Timestamptz(3)
   attempts    Int         @default(0)
+  claimVersion Int        @default(0)
   failedAttempts Int      @default(0)
   error       String?
   messageId   String?
